@@ -33,5 +33,5 @@ if "data" in st.session_state:
     name_index = 0
     for res in result:
         st.subheader(f"{names[name_index]} Split: ")
-        st.dataframe(res.compute())
+        st.dataframe(res.compute().head())
         name_index += 1
