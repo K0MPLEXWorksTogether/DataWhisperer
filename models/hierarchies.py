@@ -13,8 +13,8 @@ class Hierarchies(DataPreProcessor):
     It also inherits from DataPreProcessor
     """
 
-    def __init__(self, dataframe: dd.DataFrame, index_of_target: int):
-        super().__init__(dataframe, index_of_target)
+    def __init__(self, dataframe: dd.DataFrame, index_of_target: int, problem_type: str = None):
+        super().__init__(dataframe, index_of_target, problem_type)
 
         # Assuming preprocess returns a tuple where the first element is the processed data
         self.train = self.preprocess(impute_missing=True)[0].compute()

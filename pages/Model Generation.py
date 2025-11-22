@@ -1,11 +1,13 @@
 import streamlit as st
 from src.preprocess import DataPreProcessor
+from src.utils import detect_problem_type, is_regression
 from evalml.automl import AutoMLSearch
 from evalml.utils import infer_feature_types
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, mean_squared_error, mean_absolute_error, r2_score
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import numpy as np
 
 st.title("Model Generation")
 st.markdown(
@@ -15,11 +17,11 @@ st.markdown(
     
     - The validation data is used to find the best model.
     - The training data is used to train the best model.
-    - The testing data is used to find the confusion matrix.
+    - The testing data is used to evaluate the model.
     
-    The metrics used to find the best model is **Log Loss**: A simple log loss of a model from validation is used,
-    and compared with a baseline model, which is a random or majority class
-    predictor. 
+    **For Classification:** Metrics include Log Loss, Accuracy, Precision, Recall, F1-Score, and Confusion Matrix.
+    
+    **For Regression:** Metrics include RMSE (Root Mean Squared Error), MAE (Mean Absolute Error), and R² Score.
     """
 )
 
@@ -31,10 +33,10 @@ def extract_pipeline_description(pipeline_name):
     # Initialize an empty description.
     description = []
 
-    # Iterate through words until 'Classifier' is encountered.
+    # Iterate through words until 'Classifier' or 'Regressor' is encountered.
     for word in words:
         description.append(word)
-        if 'Classifier' in word:
+        if 'Classifier' in word or 'Regressor' in word:
             break
 
     # Join the description into a single string and return.
@@ -50,19 +52,21 @@ def return_splits(dataframe, target_index) -> list:
 # Check if 'data' and 'index' are in session state
 if "data" in st.session_state and "index" in st.session_state:
     with st.spinner("Finding the best models for the dataset..."):
-        train_test_validation = return_splits(st.session_state["data"], st.session_state["index"])
+        # Detect problem type first
+        problem_type = detect_problem_type(st.session_state["data"], st.session_state["index"])
+        
+        # Store in session state for other pages
+        st.session_state["problem_type"] = problem_type
+        
+        # Get preprocessed splits with problem type
+        preprocessor = DataPreProcessor(st.session_state["data"], st.session_state["index"], problem_type)
+        train_test_validation = preprocessor.preprocess()
 
         train = train_test_validation[0]
         test = train_test_validation[1]
         validation = train_test_validation[2]
 
         target_column = train.columns[-1]
-        classification_type = ""
-        unique = train[target_column].compute().nunique()
-        if unique == 2:
-            classification_type += "binary"
-        else:
-            classification_type += "multiclass"
 
         # Split the datasets into features and targets
         X_train = train.drop(columns=[target_column]).compute()
@@ -84,12 +88,12 @@ if "data" in st.session_state and "index" in st.session_state:
         automl = AutoMLSearch(
             X_train=X_val,
             y_train=y_val,
-            problem_type=classification_type,
+            problem_type=problem_type,
             max_batches=5,
             objective='auto',
             random_seed=42,
             max_time=60,
-            optimize_thresholds=True,
+            optimize_thresholds=(problem_type in ['binary', 'multiclass']),
             n_jobs=-1,
             patience=75,
             ensembling=True,
@@ -117,30 +121,84 @@ if "data" in st.session_state and "index" in st.session_state:
 
     st.success("Training was successful!")
 
-    st.markdown("## Classification Report: Before Testing")
+    # Run predictions on training and test data
     train_predictions = pipeline.predict(X_train)
-    training_report = classification_report(y_train, train_predictions, output_dict=True)
-    training_report_df = pd.DataFrame(training_report).transpose()
-    st.dataframe(training_report_df)
-
-    # Run predictions on the selected test records
     predictions = pipeline.predict(X_test)
 
-    # Display classification report
-    st.markdown("## Classification Report: After Testing")
-    report = classification_report(y_test, predictions, output_dict=True)
-    report_df = pd.DataFrame(report).transpose()
-    st.dataframe(report_df)
+    # Display metrics based on problem type
+    if problem_type == "regression":
+        # Regression metrics
+        st.markdown("## Regression Metrics: Training Data")
+        
+        train_rmse = mean_squared_error(y_train, train_predictions, squared=False)
+        train_mae = mean_absolute_error(y_train, train_predictions)
+        train_r2 = r2_score(y_train, train_predictions)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label="RMSE (Training)", value=f"{train_rmse:.4f}")
+        with col2:
+            st.metric(label="MAE (Training)", value=f"{train_mae:.4f}")
+        with col3:
+            st.metric(label="R² Score (Training)", value=f"{train_r2:.4f}")
+        
+        st.markdown("## Regression Metrics: Test Data")
+        
+        test_rmse = mean_squared_error(y_test, predictions, squared=False)
+        test_mae = mean_absolute_error(y_test, predictions)
+        test_r2 = r2_score(y_test, predictions)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label="RMSE (Test)", value=f"{test_rmse:.4f}", delta=f"{train_rmse - test_rmse:.4f}")
+        with col2:
+            st.metric(label="MAE (Test)", value=f"{test_mae:.4f}", delta=f"{train_mae - test_mae:.4f}")
+        with col3:
+            st.metric(label="R² Score (Test)", value=f"{test_r2:.4f}", delta=f"{test_r2 - train_r2:.4f}")
+        
+        # Residual plot
+        st.markdown("## Residual Plot")
+        residuals = y_test - predictions
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(predictions, residuals, alpha=0.5)
+        ax.axhline(y=0, color='r', linestyle='--')
+        ax.set_xlabel('Predicted Values')
+        ax.set_ylabel('Residuals')
+        ax.set_title('Residual Plot')
+        st.pyplot(fig)
+        
+        # Prediction vs Actual plot
+        st.markdown("## Predicted vs Actual Values")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(y_test, predictions, alpha=0.5)
+        ax.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
+        ax.set_xlabel('Actual Values')
+        ax.set_ylabel('Predicted Values')
+        ax.set_title('Predicted vs Actual Values')
+        st.pyplot(fig)
+        
+    else:
+        # Classification metrics
+        st.markdown("## Classification Report: Training Data")
+        training_report = classification_report(y_train, train_predictions, output_dict=True)
+        training_report_df = pd.DataFrame(training_report).transpose()
+        st.dataframe(training_report_df)
 
-    # Display confusion matrix
-    st.markdown("## Confusion Matrix")
-    cm = confusion_matrix(y_test, predictions)
-    fig, ax = plt.subplots()
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
-    ax.set_xlabel('Predicted labels')
-    ax.set_ylabel('True labels')
-    ax.set_title('Confusion Matrix')
-    st.pyplot(fig)
+        # Display classification report
+        st.markdown("## Classification Report: Test Data")
+        report = classification_report(y_test, predictions, output_dict=True)
+        report_df = pd.DataFrame(report).transpose()
+        st.dataframe(report_df)
+
+        # Display confusion matrix
+        st.markdown("## Confusion Matrix")
+        cm = confusion_matrix(y_test, predictions)
+        fig, ax = plt.subplots()
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+        ax.set_xlabel('Predicted labels')
+        ax.set_ylabel('True labels')
+        ax.set_title('Confusion Matrix')
+        st.pyplot(fig)
 
 else:
     st.warning('Please upload data and specify the target column index.')

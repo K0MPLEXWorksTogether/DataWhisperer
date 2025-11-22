@@ -10,6 +10,7 @@ import pandas as pd
 
 from src.preprocess import DataPreProcessor
 from src.knowledge import Knowledge
+from src.utils import detect_problem_type
 from pandas.api.types import is_numeric_dtype
 
 st.title("Visualize Your Dataset!")
@@ -30,9 +31,16 @@ if "data" in st.session_state:
     if "index" in st.session_state:
         dataframe = st.session_state["data"]
         target = st.session_state["index"]
+        
+        # Detect or retrieve problem type
+        if "problem_type" not in st.session_state:
+            problem_type = detect_problem_type(dataframe, target)
+            st.session_state["problem_type"] = problem_type
+        else:
+            problem_type = st.session_state["problem_type"]
 
         # Initializing datapreprocessor class.
-        preprocessor = DataPreProcessor(dataframe, target)
+        preprocessor = DataPreProcessor(dataframe, target, problem_type)
 
         # Separating features from target.
         target_feature = preprocessor.y

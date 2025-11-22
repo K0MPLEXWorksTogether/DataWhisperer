@@ -1,0 +1,54 @@
+# Python .gitignore - minimal, focused on Python artifacts
+
+# Byte-compiled / cache
+*.__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+*.pyd
+
+# Virtual environments
+.env
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.egg
+*.manifest
+*.spec
+
+# Installer / pip logs
+pip-log.txt
+
+# Test / coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.pytest_cache/
+
+# Type checkers / caches
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# Jupyter
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+jupyter_runtime/
+profile_default/
+
+# Misc Python artifacts
+*.pyc
+*.pyo
