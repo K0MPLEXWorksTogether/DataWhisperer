@@ -8,6 +8,7 @@ from sklearn.impute import KNNImputer
 from dask_ml.preprocessing import LabelEncoder
 from dask_ml.preprocessing import OneHotEncoder
 from dask_ml.preprocessing import StandardScaler
+from src.utils import detect_problem_type, is_regression
 
 """
 This file contains a class that can perform the following data preprocessing
@@ -41,17 +42,28 @@ def write_logs(error: bool, message: str, error_reason: Exception = None) -> Non
 
 class DataPreProcessor:
 
-    def __init__(self, input_df: dd.DataFrame, target_index: int) -> None:
+    def __init__(self, input_df: dd.DataFrame, target_index: int, problem_type: str = None) -> None:
         """
         The constructor initializes the dataframe and the target index
         as attributes of the class.
         It also initializes logging for the class.
+        
+        :param input_df: The input Dask DataFrame
+        :param target_index: The index of the target column
+        :param problem_type: Optional problem type ('regression', 'binary', 'multiclass'). 
+                            If None, will be auto-detected.
         """
         try:
             # Initializing dataframe and target index as attributes.
             self.df = input_df
             self.target = target_index
             self.missing(impute=True)
+
+            # Detect or set problem type
+            if problem_type is None:
+                self.problem_type = detect_problem_type(self.df, self.target)
+            else:
+                self.problem_type = problem_type
 
             # Separating the target from the features.
             self.X = self.df.iloc[:, self.df.columns != self.df.columns[self.target]]
@@ -236,17 +248,26 @@ class DataPreProcessor:
 
         # Calculating upper and lower bounds.
         lower_bound = q1 - 1.5 * iqr
-        upper_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
 
         self.df = self.df[(self.df.iloc[:, column] >= lower_bound) & (self.df.iloc[:, column]) <= upper_bound]
 
     def encode_target(self) -> None:
         """
-        The function encodes the target variable using the LabelEncoder,
-        only if it is not encoded before.
+        The function encodes the target variable using the LabelEncoder for classification,
+        or keeps it as-is for regression.
         :return: None
         """
         try:
+            # For regression, skip encoding - keep continuous values
+            if self.problem_type == "regression":
+                write_logs(
+                    error=False,
+                    message="Regression target - no encoding needed."
+                )
+                return
+
+            # For classification, encode if not numeric
             # Convert for pandas.
             pandas = self.y.compute()
 

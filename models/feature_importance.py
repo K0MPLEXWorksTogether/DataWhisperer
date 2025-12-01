@@ -1,5 +1,6 @@
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from src.preprocess import DataPreProcessor
+from src.utils import detect_problem_type
 
 import dask.dataframe as dd
 import matplotlib.pyplot as plt
@@ -8,7 +9,7 @@ import io
 
 class FeatureImportance:
     """
-    The class utilizes the RandomForestClassifier from scikit-learn
+    The class utilizes RandomForest (Classifier or Regressor) from scikit-learn
     to find important features of the dataset.
     It provides two methods:
     - importance() - Finds the importance of all the features as a dictionary.
@@ -16,9 +17,20 @@ class FeatureImportance:
     a simple bar graph.
     """
 
-    def __init__(self, dataframe: dd.DataFrame, target_index: int) -> None:
-        self.train = DataPreProcessor(dataframe, target_index).preprocess()[0].compute()
-        self.model = RandomForestClassifier(random_state=42)
+    def __init__(self, dataframe: dd.DataFrame, target_index: int, problem_type: str = None) -> None:
+        # Detect problem type if not provided
+        if problem_type is None:
+            problem_type = detect_problem_type(dataframe, target_index)
+        
+        self.problem_type = problem_type
+        preprocessor = DataPreProcessor(dataframe, target_index, problem_type)
+        self.train = preprocessor.preprocess()[0].compute()
+        
+        # Use appropriate model based on problem type
+        if problem_type == "regression":
+            self.model = RandomForestRegressor(random_state=42)
+        else:
+            self.model = RandomForestClassifier(random_state=42)
 
         target_column = self.train.columns[-1]
         self.features = self.train.drop(columns=[target_column])

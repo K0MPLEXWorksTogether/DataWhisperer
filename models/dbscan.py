@@ -22,13 +22,14 @@ class DBScan:
     - visualize(): Visualize the clusters in the dataset using colormaps.
     """
 
-    def __init__(self, dataframe: dd.DataFrame, target_index: int) -> None:
+    def __init__(self, dataframe: dd.DataFrame, target_index: int, problem_type: str = None) -> None:
         """
         Preprocesses the data for training, testing and validation.
         :param dataframe: The dataframe to cluster.
         :param target_index: The index of the target column.
+        :param problem_type: Optional problem type specification.
         """
-        preprocess = DataPreProcessor(dataframe, target_index)
+        preprocess = DataPreProcessor(dataframe, target_index, problem_type)
         train, test, validation = preprocess.preprocess()
 
         self.train = train.compute()
@@ -59,12 +60,25 @@ class DBScan:
             dbscan = DBSCAN(eps=params["eps"], min_samples=params["min_samples"])
             labels = dbscan.fit_predict(self.validation)
 
-            if len(set(labels)) > 1:
-                score = silhouette_score(self.validation, labels)
+            # Need at least 2 clusters (excluding noise) for silhouette
+            unique_labels = set(labels)
+            if len(unique_labels) > 1:
+                try:
+                    score = silhouette_score(self.validation, labels)
+                except Exception:
+                    score = -1
                 if score > best_score:
                     best_params = params
                     best_labels = labels
                     best_score = score
+
+        # Fallback if no params produced >1 cluster
+        if best_params is None:
+            best_params = {"eps": 0.5, "min_samples": 5}
+            dbscan = DBSCAN(eps=best_params["eps"], min_samples=best_params["min_samples"])
+            best_labels = dbscan.fit_predict(self.validation)
+            # Silhouette not meaningful with single cluster; keep score as None
+            best_score = None
 
         return [best_params, best_score, best_labels]
 
@@ -78,10 +92,10 @@ class DBScan:
         test_results = self.search_hyperparameters()
         self.train.columns = self.train.columns.astype(str)
 
-        params = test_results[0]
+        params, _, labels = test_results
+        # Ensure train columns are strings for consistency
         self.model = DBSCAN(eps=params["eps"], min_samples=params["min_samples"])
         self.predictions = self.model.fit_predict(self.train)
-
         self.train["clusters"] = self.predictions
 
     def visualize(self) -> io.BytesIO:
@@ -109,8 +123,16 @@ class DBScan:
         of the clustering.
         :return: The silhouette score.
         """
-        score = silhouette_score(self.train, self.predictions)
-        return score
+        # Guard against cases with <2 clusters
+        if self.predictions is None:
+            return None
+        unique_labels = set(self.predictions)
+        if len(unique_labels) <= 1:
+            return None
+        try:
+            return silhouette_score(self.train, self.predictions)
+        except Exception:
+            return None
 
 
 def main():
